@@ -79,43 +79,53 @@ class LoadStore(object):
             print('Load request at %d' % self.sim.now)
             duration = 5
             id = self.env.draw()
-
-            data_arrival = self.sim.process(self.accessL1())
-            code, child = yield data_arrival
-            print('Dep %s' % Dep(id, child))
-
+            execstr = "ldr#%d" % id
+            lat = 1
+            execstr += "[%d]." % lat
+            data_arrival = self.sim.process(self.accessL1(id))
+            code, L1_execstr = yield data_arrival
+            execstr += L1_execstr
+            print("%s" % execstr)
             if (code  == 0):
                 print('L1 hit at %d' %  self.sim.now)
             else:
                 print('L1 miss %d' % self.sim.now)
 
 
-    def accessL1(self):
+    def accessL1(self, id):
+        print("parent is %d" % id)
         prob = random.uniform(0,1)
         hitL1 = prob < 0.5
         id = self.env.draw()
+        execstr = "L1#%d" % id
 
         if hitL1:
-            L1lat = random.randint(2,3)  # L1 latency
-            yield self.sim.timeout(L1lat)
-            return (0, Dep(id,-1))
+            lat = random.randint(2,3)  # L1 latency
+            execstr += "[%d]." % lat
+            yield self.sim.timeout(lat)
+            return (0, execstr)
         else: # miss L1
+            lat = 2
+            execstr += "[%d]." % lat
             L2 = self.sim.process(self.accessL2())
-            code, child = yield L2
-            return (code, Dep(id, child))
+            code, L2_execstr = yield L2
+            execstr += "%s." % L2_execstr
+            return (code, execstr)
 
     def accessL2(self):
         id = self.env.draw()
         hitL2 = random.uniform(0,1) < 0.75
-
+        execstr = "L2#%d" % id
         if hitL2:
-            L2lat = random.randint(8,12)
-            yield self.sim.timeout(L2lat)
-            return (0, Dep(id, -1))
+            lat = random.randint(8,12)
+            yield self.sim.timeout(lat)
+            execstr += "[%d]." % lat
+            return (0, execstr)
         else: # miss L2
-            Memorylat = random.randint(15,30)
-            yield self.sim.timeout(Memorylat)
-            return (1, Dep(id, -1))
+            lat = random.randint(15,30) # memory latency
+            yield self.sim.timeout(lat)
+            execstr += "[%d]." % lat
+            return (1, execstr)
 
 
 
