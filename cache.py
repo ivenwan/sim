@@ -76,7 +76,7 @@ class LoadStore(object):
 
     def run(self):
         while True:
-            print('Load request at %d' % self.sim.now)
+            print('@{0:5d} : '.format(self.sim.now), end='')
             duration = 5
             id = self.env.draw()
             execstr = "ldr#%d" % id
@@ -86,14 +86,10 @@ class LoadStore(object):
             code, L1_execstr = yield data_arrival
             execstr += L1_execstr
             print("%s" % execstr)
-            if (code  == 0):
-                print('L1 hit at %d' %  self.sim.now)
-            else:
-                print('L1 miss %d' % self.sim.now)
+
 
 
     def accessL1(self, id):
-        print("parent is %d" % id)
         prob = random.uniform(0,1)
         hitL1 = prob < 0.5
         id = self.env.draw()
