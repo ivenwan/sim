@@ -41,84 +41,66 @@ class Pool(object):
         self.id = self.id+1
         return id
 
-class MyEnv(object):
-    def __init__(self):
-        self.sim = simpy.Environment()
-        self.idpool = Pool()
-
-    def process(self, arg):
-        return self.env.process(arg)
 
 
-    def draw(self):
-        return self.idpool.draw()
 
-class Dep(object):
-    def __init__(self, parent, child):
-        self.parent = parent
-        self.child = [child]
-
-    def addchild(self, child):
-        self.child.append(child)
-
-    def __str__(self):
-        buf = "%s -> " % self.parent
-        for child in self.child:
-            buf += "%s" % child
-        return buf
 
 
 class MSQ(object):
-    def __init__(self, env, num_units):
+    def __init__(self, env, num_units, pool):
         self.env = env
         self.arbiter = simpy.Resource(env, num_units)
         self.freelist = list(range(0,num_units))  #0..num_units-1
         self.busylist = []
+        self.pool = pool
 
     def Alloc(self):
-        assert(not self.freelist)
+        assert(self.freelist)
+        print(self.freelist)
         unit = self.freelist.pop()
         self.busylist.append(unit)
         return unit
 
     def Release(self):
-        assert(not self.busylist)
+        assert(self.busylist)
         unit = self.busylist.pop()
         self.freelist.append(unit)
         return unit
 
 
-
     def Access(self, unit):
-        id = self.env.draw()
         hitL2 = random.uniform(0, 1) < 0.75
-        execstr = "MSQ_L2#%d" % (id)
+        execstr = "MSQ_L2#"
         lat = random.randint(8, 12)
-        yield self.env.sim.timeout(lat)
+        yield self.env.timeout(lat)
         execstr += "[%d]." % (lat)
         return (0, execstr)
+
+    def Request(self):
+        with self.arbiter.request() as request:
+            yield request
+        msqid = self.Alloc()
+        print('@%d: msq req grant %d' % (self.env.now, msqid))
+        return msqid
 
 
 
 class LoadStore(object):
-    def __init__(self, env, msq):
+    def __init__(self, env, msq, pool):
         self.env = env
-        self.sim = env.sim
-        self.action = self.sim.process(self.run())
         self.msq = msq
-        self.msq_arb = simpy.Resource(env, 4)
-
+        self.pool = pool
         #self.run()
 
     def run(self):
         while True:
-            print('@{0:5d} : '.format(self.sim.now), end='')
+            print('@{0:5d} : '.format(self.env.now), end='')
             duration = 5
-            id = self.env.draw()
+            id = self.pool.draw()
             execstr = "ldr#%d" % id
             lat = 1
             execstr += "[%d]." % lat
-            data_arrival = self.sim.process(self.accessL1(id))
+            data_arrival = self.env.process(self.accessL1(id))
             code, L1_execstr = yield data_arrival
             execstr += L1_execstr
             print("%s" % execstr)
@@ -128,61 +110,49 @@ class LoadStore(object):
     def accessL1(self, id):
         prob = random.uniform(0,1)
         hitL1 = prob < 0.5
-        id = self.env.draw()
+        id = self.pool.draw()
         execstr = "L1#%d" % id
 
         if hitL1:
             lat = random.randint(2,3)  # L1 latency
             execstr += "[%d]." % lat
-            yield self.sim.timeout(lat)
+            yield self.env.timeout(lat)
             return (0, execstr)
         else: # miss L1
             lat = 2
             execstr += "[%d]." % lat
-            # request MSQ
-#            miss = self.msq.Request()
-#            yield self.sim.process(miss)
-            #print('%d MSQ arbiter grant %d' % (self.env.now, alloc))
-            yield self.msq_arb.request()
 
 
-            L2 = self.sim.process(self.msq.Access(0))
-            code, L2_execstr = yield L2
-                #code, L2_execstr = yield L2
-                #L2 = self.sim.process(self.accessL2())
-                #code, L2_execstr = yield L2
-            execstr += "%s." % L2_execstr
-            return (code, execstr)
-
-    def accessL2(self):
-        id = self.env.draw()
-        hitL2 = random.uniform(0,1) < 0.75
-        execstr = "L2#%d" % id
-        if hitL2:
-            lat = random.randint(8,12)
-            yield self.sim.timeout(lat)
-            execstr += "[%d]." % lat
-            return (0, execstr)
-        else: # miss L2
-            lat = random.randint(15,30) # memory latency
-            yield self.sim.timeout(lat)
-            execstr += "[%d]." % lat
-            return (1, execstr)
+            # wait for msq request grant
+            with self.msq.arbiter.request() as request:
+                yield request
+                # alloc a msq
+                msqid = self.msq.Alloc()
+                print('@%d: msq req grant %d' % (self.env.now, msqid))
+                L2 = self.env.process(self.msq.Access(0))
+                code, L2_execstr = yield L2
+                execstr += "%s." % L2_execstr
+                # release the msq
+                self.msq.Release()
+                print('release free msq %s' % msq.freelist)
+                return (code, execstr)
 
 
 
 
 
-env = MyEnv()
+
+env = simpy.Environment()
 mem = Memory(256,1024)
 mem.linearize()
-msq = MSQ(env.sim,4)
-
 print("mem has data %s" % mem.data)
 mem.write(512,89)
+pool = Pool()
+msq = MSQ(env,4,pool)
+ls = LoadStore(env, msq, pool)
 
-ls = LoadStore(env, msq)
+env.process(ls.run())
 print('start running')
-env.sim.run(until=55)
+env.run(until=155)
 
 
