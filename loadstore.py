@@ -1,6 +1,8 @@
 import simpy
 import random
 
+L1HitRate = 0.99
+L2HitRate = 0.9
 LoadStoreCmd = ['ldr', 'str']
 
 class Memory(object):
@@ -33,6 +35,11 @@ class Memory(object):
         self.data[addr-self.start] = data
 
 
+
+def toss(success_rate):
+    return random.uniform(0, 1) < success_rate
+
+
 class Pool(object):
     def __init__(self):
         self.id = 0
@@ -63,7 +70,7 @@ class MSQ(object):
         return msq_id
 
     def access(self, msq_id):
-        hitL2 = random.uniform(0, 1) < 0.75
+        hit_L2Cache = toss(L2HitRate)
         packet = self.packet[msq_id]
         execstr = "MSQ(%d)-Addr(%08x)#" % (msq_id, packet.get_addr())
         lat = random.randint(8, 40)
@@ -135,11 +142,11 @@ class LoadStore(object):
 
     def accessL1(self, id, packet):
         prob = random.uniform(0, 1)
-        hitL1 = prob < 0.75
+        hit_L1Cache = toss(L1HitRate)
         id = self.pool.draw()
         execstr = "L1#%d" % id
 
-        if hitL1:
+        if hit_L1Cache:
             lat = random.randint(2, 3)  # L1 latency
             execstr += "[%d]." % lat
             yield self.env.timeout(lat)
@@ -162,14 +169,24 @@ class LoadStore(object):
 
 
 def setup(env, pool, loadstore, num_transactions):
+    start = env.now
     for i in range(num_transactions):
         packet = Packet(pool)
         packet.rand_addr(100,500)
         packet.rand_cmd(LoadStoreCmd)
-        yield env.timeout(random.randint(0,2))
-        env.process(loadstore.do(packet))
+        yield env.timeout(random.randint(1, 2))
+        #yield env.timeout(1)
+        yield env.process(loadstore.do(packet))
         i += 1
 
+    end = env.now
+    eclipse = end - start
+    print("###################################################")
+    print("Total %d transactions finish at time=%d" % (num_transactions, env.now))
+    throughput = num_transactions / eclipse
+    print("Throughput = %f transactions per cycle" % throughput)
+    print("###################################################")
+    return
 
 env = simpy.Environment()
 mem = Memory(256, 1024)
@@ -177,7 +194,7 @@ mem.linearize()
 print("mem has data %s" % mem.data)
 mem.write(512, 89)
 pool = Pool()
-msq = MSQ(env, 4, pool)
+msq = MSQ(env, 10, pool)
 ls = LoadStore(env, msq, pool)
 
 
