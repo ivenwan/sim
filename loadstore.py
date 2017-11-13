@@ -71,17 +71,13 @@ class MSQ(object):
     def Access(self, unit):
         hitL2 = random.uniform(0, 1) < 0.75
         execstr = "MSQ_L2#"
-        lat = random.randint(8, 12)
+        #lat = random.randint(8, 12)
+        lat=20
         yield self.env.timeout(lat)
         execstr += "[%d]." % (lat)
         return (0, execstr)
 
-    def Request(self):
-        with self.arbiter.request() as request:
-            yield request
-        msqid = self.Alloc()
-        print('@%d: msq req grant %d' % (self.env.now, msqid))
-        return msqid
+
 
 
 
@@ -92,20 +88,18 @@ class LoadStore(object):
         self.pool = pool
         #self.run()
 
-    def run(self):
-        while True:
-            print('@{0:5d} : '.format(self.env.now), end='')
-            duration = 5
-            id = self.pool.draw()
-            execstr = "ldr#%d" % id
-            lat = 1
-            execstr += "[%d]." % lat
-            data_arrival = self.env.process(self.accessL1(id))
-            code, L1_execstr = yield data_arrival
-            execstr += L1_execstr
-            print("%s" % execstr)
 
-
+    def load(self):
+        print('@{0:5d} : '.format(self.env.now), end='')
+        duration = 5
+        id = self.pool.draw()
+        execstr = "ldr#%d" % id
+        lat = 1
+        execstr += "[%d]." % lat
+        data_arrival = self.env.process(self.accessL1(id))
+        code, L1_execstr = yield data_arrival
+        execstr += L1_execstr
+        print("%s" % execstr)
 
     def accessL1(self, id):
         prob = random.uniform(0,1)
@@ -134,11 +128,16 @@ class LoadStore(object):
                 execstr += "%s." % L2_execstr
                 # release the msq
                 self.msq.Release()
-                print('release free msq %s' % msq.freelist)
+                #print('release free msq %s' % msq.freelist)
                 return (code, execstr)
 
 
 
+def setup(env, loadstore, num_transactions):
+    for i in range(num_transactions):
+        yield env.timeout(random.randint(0,2))
+        env.process(loadstore.load())
+        i += 1
 
 
 
@@ -151,8 +150,10 @@ pool = Pool()
 msq = MSQ(env,4,pool)
 ls = LoadStore(env, msq, pool)
 
-env.process(ls.run())
+#env.process(ls.run())
 print('start running')
-env.run(until=155)
+
+env.process(setup(env,ls,1000))
+env.run(until=200000)
 
 
