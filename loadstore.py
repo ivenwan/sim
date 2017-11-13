@@ -65,14 +65,13 @@ class MSQ(object):
         hitL2 = random.uniform(0, 1) < 0.75
         execstr = "MSQ(%d)#" % msqid
         lat = random.randint(8, 40)
-        #lat=20
         start = self.env.now
         yield self.env.timeout(lat)
         end = start + lat
         execstr += "[%d" % start
         execstr += "-" * lat
         execstr += "%d]." % end
-        return (0, execstr)
+        return 0, execstr
 
 
 class LoadStore(object):
@@ -80,11 +79,9 @@ class LoadStore(object):
         self.env = env
         self.msq = msq
         self.pool = pool
-        #self.run()
 
     def load(self):
         print('@{0:5d} : '.format(self.env.now), end='')
-        duration = 5
         id = self.pool.draw()
         execstr = "ldr#%d" % id
         lat = 1
@@ -116,7 +113,7 @@ class LoadStore(object):
                 #print('@%d: msq req grant %d' % (self.env.now, msq_id))
                 L2 = self.env.process(self.msq.access(msq_id))
                 code, L2_execstr = yield L2
-                execstr += "%s." % L2_execstr
+                execstr += "%s" % L2_execstr
                 # release the msq
                 self.msq.release(msq_id)
                 return (code, execstr)
