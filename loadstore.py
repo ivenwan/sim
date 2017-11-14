@@ -4,7 +4,7 @@ import random
 L1HitRate = 0.5
 L2HitRate = 0.8
 LoadStoreCmd = ['ldr', 'str']
-num_msq = 4
+num_msq = 12
 
 class Memory(object):
     def __init__(self, start, end):
@@ -23,18 +23,16 @@ class Memory(object):
         for i in range(0, self.length()):
             self.data.append(random.randint(0,100))
 
-    def check(self,addr):
+    def check(self, addr):
         assert addr>=self.start and addr<=self.end
 
-
-    def read(self,addr):
+    def read(self, addr):
         self.check(addr)
         return self.data[addr-self.start]
 
     def write(self, addr, data):
         self.check(addr)
         self.data[addr-self.start] = data
-
 
 
 def toss(success_rate):
@@ -196,6 +194,15 @@ def setup(env, pool, loadstore, num_transactions):
     print("###################################################")
     return
 
+
+def monitor(env, loadstore, msq, msq_status):
+    i = 0
+    while True:
+        busy = num_msq - len(msq.free_list)
+        msq_status[i] = busy
+        yield env.timeout(1)
+        i += 1
+
 env = simpy.Environment()
 mem = Memory(256, 1024)
 mem.linearize()
@@ -205,10 +212,21 @@ pool = Pool()
 msq = MSQ(env, num_msq, pool)
 ls = LoadStore(env, msq, pool)
 
-
+sim_cycles = 5000
+msq_status = [None] * sim_cycles
 print('start running')
 
-env.process(setup(env, pool, ls,1000))
-env.run(until=200000)
+# create a monitor thread
+env.process(monitor(env, ls, msq, msq_status))
+# run the main simulation
+env.process(setup(env, pool, ls, 1000))
+env.run(until=sim_cycles)
 
+# plot the utilization
+import pylab as pl
+x = range(1, sim_cycles+1)
+msq_limit = [num_msq] * sim_cycles
 
+pl.plot(x, msq_status)
+pl.plot(x, msq_limit, 'ro')
+pl.show()
