@@ -120,20 +120,20 @@ class LoadStore(object):
             yield self.env.process(self.store(packet))
 
     def store(self, packet):
-        print('@{0:5d} : '.format(self.env.now), end='')
+        #print('@{0:5d} : '.format(self.env.now), end='')
         id = packet.get_id()
         addr = packet.get_addr()
-        execstr = "str::id=%d ::addr=%05x" % (id, addr)
+        execstr = "@%6d str::id=%d ::addr=%05x" % (env.now, id, addr)
         lat = 1
         execstr += "[%d]." % lat
         yield self.env.timeout(lat)
         print("%s" % execstr)
 
     def load(self, packet):
-        print('@{0:5d} : '.format(self.env.now), end='')
+        #print('@{0:5d} : '.format(self.env.now), end='')
         id = packet.get_id()
         addr = packet.get_addr()
-        execstr = "ldr::id=%d ::addr=%05x-" % (id, addr)
+        execstr = "@%6d ldr::id=%d ::addr=%05x-" % (env.now, id, addr)
         lat = 1
         execstr += "[%d]." % lat
         data_arrival = self.env.process(self.accessL1(id, packet))
