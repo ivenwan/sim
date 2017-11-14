@@ -1,9 +1,10 @@
 import simpy
 import random
 
-L1HitRate = 0.99
-L2HitRate = 0.9
+L1HitRate = 0.5
+L2HitRate = 0.8
 LoadStoreCmd = ['ldr', 'str']
+num_msq = 4
 
 class Memory(object):
     def __init__(self, start, end):
@@ -167,23 +168,30 @@ class LoadStore(object):
                 self.msq.release(msq_id)
                 return (code, execstr)
 
+from simpy.events import AnyOf, AllOf, Event
 
 def setup(env, pool, loadstore, num_transactions):
     start = env.now
+    threads = [None]*num_transactions
     for i in range(num_transactions):
         packet = Packet(pool)
-        packet.rand_addr(100,500)
+        packet.rand_addr(100, 500)
         packet.rand_cmd(LoadStoreCmd)
         yield env.timeout(random.randint(1, 2))
         #yield env.timeout(1)
-        yield env.process(loadstore.do(packet))
+        threads[i] = env.process(loadstore.do(packet))
         i += 1
 
+    # wait for all thread to terminate
+    finish = AllOf(env, threads)
+    yield finish
+    # make sure all finished
+    assert all(e.processed for e in threads)
     end = env.now
     eclipse = end - start
+    throughput = num_transactions / eclipse
     print("###################################################")
     print("Total %d transactions finish at time=%d" % (num_transactions, env.now))
-    throughput = num_transactions / eclipse
     print("Throughput = %f transactions per cycle" % throughput)
     print("###################################################")
     return
@@ -194,7 +202,7 @@ mem.linearize()
 print("mem has data %s" % mem.data)
 mem.write(512, 89)
 pool = Pool()
-msq = MSQ(env, 10, pool)
+msq = MSQ(env, num_msq, pool)
 ls = LoadStore(env, msq, pool)
 
 
