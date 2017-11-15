@@ -5,6 +5,9 @@ L1HitRate = 0.5
 L2HitRate = 0.8
 LoadStoreCmd = ['ldr', 'str']
 num_msq = 12
+num_orq = 20
+L2LatMin = 8
+L2LatMax = 40
 
 class Memory(object):
     def __init__(self, start, end):
@@ -48,31 +51,29 @@ class Pool(object):
         self.id = self.id+1
         return id
 
-
-class MSQ(object):
-    def __init__(self, env, capacity, pool):
+class L2Ctrl(object):
+    def __init__(self, env, orq_capacity, pool):
         self.env = env
-        self.arbiter = simpy.Resource(env, capacity)
-        self.free_list = list(range(0, capacity))
         self.pool = pool
-        self.packet = [None] * capacity
+        self.orq_arbiter = simpy.Resource(env, orq_capacity)
+        self.orq_freelist = list(range(0, orq_capacity))
+        self.orq_packets = [None] * orq_capacity
 
-    def alloc(self, packet):
-        assert self.free_list
-        msq_id = self.free_list.pop()
-        self.packet[msq_id] = packet
-        return msq_id
+    def alloc_orq(self, packet):
+        assert self.orq_freelist
+        orq_id = self.orq_freelist.pop()
+        self.orq_packets[orq_id] = packet
+        return orq_id
 
-    def release(self, msq_id):
-        assert not msq_id in self.free_list
-        self.free_list.append(msq_id)
-        return msq_id
+    def release_orq(self, orq_id):
+        assert not orq_id in self.orq_freelist
+        self.orq_freelist.append(orq_id)
 
-    def access(self, msq_id):
+    def access(self, orq_id):
         hit_L2Cache = toss(L2HitRate)
-        packet = self.packet[msq_id]
-        execstr = "MSQ(%d)-Addr(%08x)#" % (msq_id, packet.get_addr())
-        lat = random.randint(8, 40)
+        packet = self.orq_packets[orq_id]
+        execstr = "ORQ(%d)-Addr(%08x)#" % (orq_id, packet.get_addr())
+        lat = random.randint(L2LatMin, L2LatMax)
         start = self.env.now
         yield self.env.timeout(lat)
         end = start + lat
@@ -81,6 +82,41 @@ class MSQ(object):
         execstr += "%d]." % end
         return 0, execstr
 
+
+class MSQ(object):
+    def __init__(self, env, capacity, L2, pool):
+        self.env = env
+        self.arbiter = simpy.Resource(env, capacity)
+        self.free_list = list(range(0, capacity))
+        self.pool = pool
+        self.L2 = L2
+        self.packets = [None] * capacity
+
+    def alloc(self, packet):
+        assert self.free_list
+        msq_id = self.free_list.pop()
+        self.packets[msq_id] = packet
+        return msq_id
+
+    def release(self, msq_id):
+        assert not msq_id in self.free_list
+        self.free_list.append(msq_id)
+        return msq_id
+
+    def access(self, msq_id):
+
+        req = self.packets[msq_id]
+        execstr = ''
+        with self.L2.orq_arbiter.request() as request:
+            yield request
+            # alloc a orq
+            orq_id = self.L2.alloc_orq(req)
+            L2_access = self.env.process(self.L2.access(orq_id))
+            code, L2_execstr = yield L2_access
+            execstr += "MSQ(%d) %s" % (msq_id, L2_execstr)
+            # release the orq
+            self.L2.release_orq(orq_id)
+            return (code, execstr)
 
 class Packet(object):
     def __init__(self, pool):
@@ -118,7 +154,6 @@ class LoadStore(object):
             yield self.env.process(self.store(packet))
 
     def store(self, packet):
-        #print('@{0:5d} : '.format(self.env.now), end='')
         id = packet.get_id()
         addr = packet.get_addr()
         execstr = "@%6d str::id=%d ::addr=%05x" % (env.now, id, addr)
@@ -128,7 +163,6 @@ class LoadStore(object):
         print("%s" % execstr)
 
     def load(self, packet):
-        #print('@{0:5d} : '.format(self.env.now), end='')
         id = packet.get_id()
         addr = packet.get_addr()
         execstr = "@%6d ldr::id=%d ::addr=%05x-" % (env.now, id, addr)
@@ -159,8 +193,8 @@ class LoadStore(object):
                 # alloc a msq
                 msq_id = self.msq.alloc(packet)
                 #print('@%d: msq req grant %d' % (self.env.now, msq_id))
-                L2 = self.env.process(self.msq.access(msq_id))
-                code, L2_execstr = yield L2
+                msq_access = self.env.process(self.msq.access(msq_id))
+                code, L2_execstr = yield msq_access
                 execstr += "%s" % L2_execstr
                 # release the msq
                 self.msq.release(msq_id)
@@ -195,11 +229,11 @@ def setup(env, pool, loadstore, num_transactions):
     return
 
 
-def monitor(env, loadstore, msq, msq_status):
+def monitor(env, loadstore, msq, msq_status, L2, orq_status):
     i = 0
     while True:
-        busy = num_msq - len(msq.free_list)
-        msq_status[i] = busy
+        msq_status[i] = num_msq - len(msq.free_list)
+        orq_status[i] = num_orq - len(L2.orq_freelist)
         yield env.timeout(1)
         i += 1
 
@@ -209,15 +243,19 @@ mem.linearize()
 print("mem has data %s" % mem.data)
 mem.write(512, 89)
 pool = Pool()
-msq = MSQ(env, num_msq, pool)
+L2 = L2Ctrl(env, num_orq, pool)
+msq = MSQ(env, num_msq, L2, pool)
+
 ls = LoadStore(env, msq, pool)
+
 
 sim_cycles = 5000
 msq_status = [None] * sim_cycles
+orq_status = [None] * sim_cycles
 print('start running')
 
 # create a monitor thread
-env.process(monitor(env, ls, msq, msq_status))
+env.process(monitor(env, ls, msq, msq_status, L2, orq_status))
 # run the main simulation
 env.process(setup(env, pool, ls, 1000))
 env.run(until=sim_cycles)
@@ -226,7 +264,11 @@ env.run(until=sim_cycles)
 import pylab as pl
 x = range(1, sim_cycles+1)
 msq_limit = [num_msq] * sim_cycles
+orq_limit = [num_orq] * sim_cycles
 
 pl.plot(x, msq_status)
-pl.plot(x, msq_limit, 'ro')
+pl.plot(x, orq_status)
+pl.plot(x, msq_limit)
+pl.plot(x, orq_limit)
+
 pl.show()
