@@ -4,10 +4,10 @@ import random
 L1HitRate = 0.5
 L2HitRate = 0.8
 LoadStoreCmd = ['ldr', 'str']
-num_msq = 12
-num_orq = 20
+num_msq = 14
+num_orq = 32
 L2LatMin = 8
-L2LatMax = 40
+L2LatMax = 120
 
 class Memory(object):
     def __init__(self, start, end):
@@ -141,9 +141,9 @@ class Packet(object):
 
 
 class LoadStore(object):
-    def __init__(self, env, msq, pool):
+    def __init__(self, env, L2, pool):
         self.env = env
-        self.msq = msq
+        self.msq = MSQ(env, num_msq, L2, pool)
         self.pool = pool
 
     def do(self, packet):
@@ -202,6 +202,7 @@ class LoadStore(object):
 
 from simpy.events import AnyOf, AllOf, Event
 
+
 def setup(env, pool, loadstore, num_transactions):
     start = env.now
     threads = [None]*num_transactions
@@ -229,7 +230,7 @@ def setup(env, pool, loadstore, num_transactions):
     return
 
 
-def monitor(env, loadstore, msq, msq_status, L2, orq_status):
+def monitor(env, msq, msq_status, L2, orq_status):
     i = 0
     while True:
         msq_status[i] = num_msq - len(msq.free_list)
@@ -244,20 +245,29 @@ print("mem has data %s" % mem.data)
 mem.write(512, 89)
 pool = Pool()
 L2 = L2Ctrl(env, num_orq, pool)
-msq = MSQ(env, num_msq, L2, pool)
-
-ls = LoadStore(env, msq, pool)
-
 
 sim_cycles = 5000
-msq_status = [None] * sim_cycles
+
+
+num_ls = 2
+ls = [None] * num_ls
+ls_msq_status = [None] * num_ls
+for i in range(0, num_ls):
+    ls[i] = LoadStore(env, L2, pool)
+    ls_msq_status[i] = [None] * sim_cycles
+
+
 orq_status = [None] * sim_cycles
 print('start running')
 
+#loadstore0
 # create a monitor thread
-env.process(monitor(env, ls, msq, msq_status, L2, orq_status))
-# run the main simulation
-env.process(setup(env, pool, ls, 1000))
+for i in range(0, num_ls):
+    env.process(monitor(env, ls[i].msq, ls_msq_status[i], L2, orq_status))
+    # run the main simulation
+    env.process(setup(env, pool, ls[i], 1000))
+
+
 env.run(until=sim_cycles)
 
 # plot the utilization
@@ -266,7 +276,8 @@ x = range(1, sim_cycles+1)
 msq_limit = [num_msq] * sim_cycles
 orq_limit = [num_orq] * sim_cycles
 
-pl.plot(x, msq_status)
+for i in range(0, num_ls):
+    pl.plot(x, ls_msq_status[i])
 pl.plot(x, orq_status)
 pl.plot(x, msq_limit)
 pl.plot(x, orq_limit)
