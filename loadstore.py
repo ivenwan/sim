@@ -4,7 +4,7 @@ import random
 L1HitRate = 0.5
 L2HitRate = 0.8
 LoadStoreCmd = ['ldr', 'str']
-num_msq = 14
+num_msq = 10
 num_orq = 32
 L2LatMin = 8
 L2LatMax = 120
