@@ -5,7 +5,7 @@ class Memory(object):
         self.data = []
 
     def length(self):
-        return self.end - self.start +1
+        return self.end - self.start + 1
 
     def linearize(self):
         for i in range(self.start, self.end+1):
@@ -13,7 +13,7 @@ class Memory(object):
 
     def rand(self):
         for i in range(0, self.length()):
-            self.data.append(random.randint(0,100))
+            self.data.append(random.randint(0, 100))
 
     def check(self, addr):
         assert addr>=self.start and addr<=self.end
